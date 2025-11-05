@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::event_processor::{SshEvent, TcpEvent};
+use crate::ebpf_loader::{SshEvent, TcpEvent};
 use crate::storage::Storage;
 use crate::telegram_client::TelegramClient;
 use anyhow::Context;
@@ -8,7 +8,8 @@ use log::{error, info, warn};
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tokio::sync::Mutex;
+use std::time::{Duration, SystemTime};
 
 #[derive(Debug, Clone)]
 pub struct ThreatAlert {
@@ -29,6 +30,10 @@ pub struct ThreatDetector {
     config: Config,
     storage: Arc<Storage>,
     telegram_client: Arc<TelegramClient>,
+    inner: Arc<Mutex<ThreatDetectorInner>>,
+}
+
+struct ThreatDetectorInner {
     ssh_attempts: HashMap<IpAddr, Vec<SystemTime>>,
     tcp_connections: HashMap<IpAddr, Vec<SystemTime>>,
     blocked_ips: std::collections::HashSet<IpAddr>,
@@ -44,29 +49,37 @@ impl ThreatDetector {
             config,
             storage,
             telegram_client,
-            ssh_attempts: HashMap::new(),
-            tcp_connections: HashMap::new(),
-            blocked_ips: std::collections::HashSet::new(),
+            inner: Arc::new(Mutex::new(ThreatDetectorInner {
+                ssh_attempts: HashMap::new(),
+                tcp_connections: HashMap::new(),
+                blocked_ips: std::collections::HashSet::new(),
+            })),
         }
     }
 
-    pub async fn process_ssh_event(&mut self, event: SshEvent) -> anyhow::Result<()> {
+    pub async fn process_ssh_event(&self, event: SshEvent) -> anyhow::Result<()> {
         let ip = self.u32_to_ip(event.ip)?;
         
-        if self.blocked_ips.contains(&ip) {
-            return Ok(());
-        }
+        let (should_process, attempt_count) = {
+            let mut inner = self.inner.lock().await;
+            
+            if inner.blocked_ips.contains(&ip) {
+                return Ok(());
+            }
 
-        let now = SystemTime::now();
-        
-        let attempts = self.ssh_attempts.entry(ip).or_insert_with(Vec::new);
-        attempts.push(now);
+            let now = SystemTime::now();
+            
+            let attempts = inner.ssh_attempts.entry(ip).or_insert_with(Vec::new);
+            attempts.push(now);
 
-        let window = Duration::from_secs(self.config.ssh_window_seconds);
-        attempts.retain(|&time| now.duration_since(time).unwrap_or(Duration::ZERO) < window);
+            let window = Duration::from_secs(self.config.ssh_window_seconds);
+            attempts.retain(|&time| now.duration_since(time).unwrap_or(Duration::ZERO) < window);
 
-        let attempt_count = attempts.len() as u64;
-        if attempt_count > self.config.ssh_threshold {
+            let attempt_count = attempts.len() as u64;
+            (attempt_count > self.config.ssh_threshold, attempt_count)
+        };
+
+        if should_process {
             warn!("SSH brute force detected from IP: {}", ip);
             
             let alert = ThreatAlert {
@@ -89,23 +102,29 @@ impl ThreatDetector {
         Ok(())
     }
 
-    pub async fn process_tcp_event(&mut self, event: TcpEvent) -> anyhow::Result<()> {
+    pub async fn process_tcp_event(&self, event: TcpEvent) -> anyhow::Result<()> {
         let ip = self.u32_to_ip(event.src_ip)?;
         
-        if self.blocked_ips.contains(&ip) {
-            return Ok(());
-        }
+        let (should_process, connection_count) = {
+            let mut inner = self.inner.lock().await;
+            
+            if inner.blocked_ips.contains(&ip) {
+                return Ok(());
+            }
 
-        let now = SystemTime::now();
-        
-        let connections = self.tcp_connections.entry(ip).or_insert_with(Vec::new);
-        connections.push(now);
+            let now = SystemTime::now();
+            
+            let connections = inner.tcp_connections.entry(ip).or_insert_with(Vec::new);
+            connections.push(now);
 
-        let window = Duration::from_secs(self.config.tcp_window_seconds);
-        connections.retain(|&time| now.duration_since(time).unwrap_or(Duration::ZERO) < window);
+            let window = Duration::from_secs(self.config.tcp_window_seconds);
+            connections.retain(|&time| now.duration_since(time).unwrap_or(Duration::ZERO) < window);
 
-        let connection_count = connections.len() as u64;
-        if connection_count > self.config.tcp_threshold {
+            let connection_count = connections.len() as u64;
+            (connection_count > self.config.tcp_threshold, connection_count)
+        };
+
+        if should_process {
             warn!("TCP flood/port scan detected from IP: {}", ip);
             
             let alert = ThreatAlert {
@@ -128,8 +147,8 @@ impl ThreatDetector {
         Ok(())
     }
 
-    async fn block_ip(&mut self, ip: IpAddr) -> anyhow::Result<()> {
-        self.blocked_ips.insert(ip);
+    async fn block_ip(&self, ip: IpAddr) -> anyhow::Result<()> {
+        self.inner.lock().await.blocked_ips.insert(ip);
         
         let ip_str = ip.to_string();
         let output = tokio::process::Command::new("iptables")
