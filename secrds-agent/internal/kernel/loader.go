@@ -81,15 +81,41 @@ func (l *Loader) LoadCPrograms() error {
 	l.collection = coll
 
 	// Attach kprobe for inet_csk_accept (incoming connections on server)
+	// This is CRITICAL for detecting incoming SSH connections
+	acceptAttached := false
 	if acceptProg := coll.Programs["ssh_kprobe_accept"]; acceptProg != nil {
 		kpAccept, err := link.Kprobe("inet_csk_accept", acceptProg, nil)
 		if err != nil {
-			fmt.Printf("Warning: failed to attach kprobe inet_csk_accept: %v\n", err)
-			fmt.Printf("This is normal if kernel doesn't export this symbol. Trying alternative...\n")
+			fmt.Printf("ERROR: failed to attach kprobe inet_csk_accept: %v\n", err)
+			fmt.Printf("WARNING: Incoming SSH connections may not be detected!\n")
+			fmt.Printf("This kernel symbol may not be available. Check with: cat /proc/kallsyms | grep inet_csk_accept\n")
+			
+			// Try alternative: tcp_v4_syn_recv_sock (called when server receives SYN)
+			fmt.Printf("Trying alternative: tcp_v4_syn_recv_sock...\n")
+			if altProg, altErr := link.Kprobe("tcp_v4_syn_recv_sock", acceptProg, nil); altErr == nil {
+				l.links = append(l.links, altProg)
+				fmt.Println("Attached kprobe to tcp_v4_syn_recv_sock (alternative for incoming connections)")
+				acceptAttached = true
+			} else {
+				fmt.Printf("Alternative also failed: %v\n", altErr)
+				fmt.Printf("CRITICAL: No incoming connection detection available!\n")
+			}
 		} else {
 			l.links = append(l.links, kpAccept)
 			fmt.Println("Attached kprobe to inet_csk_accept (incoming connections)")
+			acceptAttached = true
 		}
+	}
+	
+	if !acceptAttached {
+		fmt.Printf("\n")
+		fmt.Printf("=================================================================\n")
+		fmt.Printf("WARNING: Incoming connection detection is NOT working!\n")
+		fmt.Printf("Only outgoing connections will be detected.\n")
+		fmt.Printf("To fix this, ensure your kernel exports inet_csk_accept symbol.\n")
+		fmt.Printf("Check: cat /proc/kallsyms | grep inet_csk_accept\n")
+		fmt.Printf("=================================================================\n")
+		fmt.Printf("\n")
 	}
 
 	// Attach kprobe for tcp_v4_connect (outgoing connections)
