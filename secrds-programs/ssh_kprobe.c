@@ -16,6 +16,16 @@ struct {
     __uint(value_size, sizeof(__u64));
 } ssh_attempts SEC(".maps");
 
+// sockaddr_in structure (simplified for IPv4)
+struct sockaddr_in {
+    __u16 sin_family;      // AF_INET = 2
+    __be16 sin_port;       // Port in network byte order
+    struct in_addr {
+        __be32 s_addr;      // IP address in network byte order
+    } sin_addr;
+    __u8 sin_zero[8];      // Padding
+};
+
 // Hook into inet_csk_accept to detect incoming SSH connections on the server side
 // This is called when the server accepts a new connection
 SEC("kprobe/inet_csk_accept")
@@ -42,7 +52,6 @@ int ssh_kprobe_accept(struct pt_regs *ctx)
     
     __u32 src_ip = 0;
     __u32 dst_ip = 0;
-    __u16 src_port = 0;
     __u16 dst_port = 0;
     
     // Try to read destination port (offset varies by kernel, try common ones)
