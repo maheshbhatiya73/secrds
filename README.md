@@ -1,113 +1,113 @@
-## eBPF Security Monitor (secrds)
+## secrds - Security Monitor
 
-An eBPF-powered host security monitor that detects SSH brute-force and TCP anomalies (port scans / floods), optionally blocks offending IPs via iptables, and sends alerts to Telegram.
+A kernel-powered host security monitor that detects SSH brute-force and TCP anomalies (port scans / floods), optionally blocks offending IPs via iptables, and sends alerts to Telegram.
 
 ### Components
-- **Agent (`ebpf-detector-agent`)**: Loads eBPF programs, processes events, persists alerts, sends Telegram notifications, and (optionally) blocks IPs.
-- **CLI (`ebpf-detector`)**: Check status, list recent alerts, view stats, and control the agent.
-- **eBPF Programs**: Implemented in Rust (`ebpf-detector-ebpf`) and C (`ebpf-detector-ebpf-c`).
+- **Agent (`secrds-agent`)**: Loads kernel programs, processes events, persists alerts, sends Telegram notifications, and (optionally) blocks IPs.
+- **CLI (`secrds`)**: Check status, list recent alerts, view stats, and control the agent.
+- **Kernel Programs**: Implemented in C (`secrds-programs`).
 
 ### Requirements
-- Linux kernel 5.8+ with eBPF features enabled
-- `rustup`, Rust toolchain (nightly required for eBPF build), `cargo`
-- `bpf-linker` (installed automatically by `build.sh` if missing)
+- Linux kernel 5.8+ with kernel program features enabled
+- Go 1.21 or later
+- `clang` and `llvm` (for building kernel programs)
 - `iptables` (for optional auto-blocking)
 - `systemd` (to run the agent as a service)
 - Internet access for Telegram API
 
 ### Quick Start
 ```bash
-# 1) Build everything (eBPF + agent + CLI)
+# 1) Build everything (kernel programs + agent + CLI)
 ./build.sh
 
 # 2) Install system-wide (requires sudo)
 sudo ./install.sh
 
 # 3) Configure Telegram credentials
-sudo nano /etc/ebpf-detector/env.conf
-# Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID
+sudo nano /etc/secrds/config.yaml
+# Set telegram.bot_token and telegram.chat_id under the telegram section
 
-# 4) (Optional) Tune thresholds
-sudo nano /etc/ebpf-detector/config.toml
+# 4) (Optional) Tune thresholds in the same config.yaml file
 
 # 5) Start and enable the service
-sudo systemctl start ebpf-detector
-sudo systemctl enable ebpf-detector
+sudo systemctl start secrds
+sudo systemctl enable secrds
 
 # 6) Check status and logs
-systemctl status ebpf-detector
-journalctl -u ebpf-detector -f
+systemctl status secrds
+journalctl -u secrds -f
 ```
 
 ### Installation Details
 - `install.sh` will:
   - Build binaries (via `build.sh`)
-  - Install `ebpf-detector-agent` and `ebpf-detector` to `/usr/local/bin/`
-  - Install `ebpf-detector.service` to `/etc/systemd/system/`
-  - Create config at `/etc/ebpf-detector/config.toml` (if missing)
-  - Create env file at `/etc/ebpf-detector/env.conf` (Telegram settings)
-  - Create data dir `/var/lib/ebpf-detector` and log dir `/var/log/ebpf-detector`
+  - Install `secrds-agent` and `secrds` to `/usr/local/bin/`
+  - Install `secrds.service` to `/etc/systemd/system/`
+  - Create config at `/etc/secrds/config.yaml` (if missing)
+  - Create env file at `/etc/secrds/env.conf` (Telegram settings)
+  - Create data dir `/var/lib/secrds` and log dir `/var/log/secrds`
 
 ### Configuration
-- Main config file: `/etc/ebpf-detector/config.toml`
+- Main config file: `/etc/secrds/config.yaml` (YAML format)
   - `ssh_threshold` (default 5)
   - `ssh_window_seconds` (default 300)
   - `tcp_threshold` (default 10)
   - `tcp_window_seconds` (default 60)
   - `enable_ip_blocking` (default true)
-  - `storage_path` (default `/var/lib/ebpf-detector/events.json`)
-  - `pid_file` (default `/var/run/ebpf-detector.pid`)
+  - `storage_path` (default `/var/lib/secrds/events.json`)
+  - `pid_file` (default `/var/run/secrds.pid`)
   - `log_level` (default `info`)
-  - `log_file` (default `/var/log/ebpf-detector/agent.log`)
+  - `log_file` (default `/var/log/secrds/agent.log`)
 
-- Environment file: `/etc/ebpf-detector/env.conf`
-  - `TELEGRAM_BOT_TOKEN` = your bot token (from Telegram `@BotFather`)
-  - `TELEGRAM_CHAT_ID` = your chat ID (e.g., via `@userinfobot`)
-  - Optional: `EBPF_DETECTOR_CONFIG` to point to a custom config path
+- Telegram configuration (in `config.yaml`):
+  - `telegram.bot_token` = your bot token (from Telegram `@BotFather`)
+  - `telegram.chat_id` = your chat ID (e.g., via `@userinfobot`)
+  - Optional: `SECRDS_CONFIG` environment variable to point to a custom config path
+  - Optional: `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` environment variables (override config file)
 
 ### Service (systemd)
 ```bash
-sudo systemctl start ebpf-detector
-sudo systemctl enable ebpf-detector
-systemctl status ebpf-detector
-journalctl -u ebpf-detector -f
+sudo systemctl start secrds
+sudo systemctl enable secrds
+systemctl status secrds
+journalctl -u secrds -f
 ```
 
 ### CLI Usage
 ```bash
 # Show agent/service status
-ebpf-detector status
+secrds status
 
 # Show recent alerts (default 10; customize with --limit)
-ebpf-detector alerts --limit 20
+secrds alerts --limit 20
 
 # Show stats (e.g., blocked IPs, counts)
-ebpf-detector stats
+secrds stats
 
 # Print current config (resolved)
-ebpf-detector config
+secrds config
 
 # Control the agent
-ebpf-detector start
-ebpf-detector stop
-ebpf-detector restart
+secrds start
+secrds stop
+secrds restart
 ```
 
 ### Paths
-- Config: `/etc/ebpf-detector/`
-- Data: `/var/lib/ebpf-detector/events.json`
-- PID: `/var/run/ebpf-detector.pid`
-- Logs: `/var/log/ebpf-detector/agent.log`
-- Binaries: `/usr/local/bin/ebpf-detector-agent`, `/usr/local/bin/ebpf-detector`
+- Config: `/etc/secrds/config.yaml` (includes Telegram settings)
+- Data: `/var/lib/secrds/events.json`
+- PID: `/var/run/secrds.pid`
+- Logs: `/var/log/secrds/agent.log`
+- Binaries: `/usr/local/bin/secrds-agent`, `/usr/local/bin/secrds`
 
 ### Troubleshooting
 - Kernel 5.8+ required: `uname -r`
-- Build tools: ensure `rustup`, `cargo` and network access to install `bpf-linker`
+- Build tools: ensure `go`, `clang`, and `llvm` are installed
 - Telegram alerts: verify `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are set and correct
 - IP blocking: requires `iptables` and root; see warnings in logs if a rule fails
 
 ---
 
-Made with Rust and eBPF. Licensed under MIT or Apache-2.0.
+Made with Go and kernel programs. Licensed under MIT or Apache-2.0.
 
 
