@@ -74,6 +74,8 @@ func main() {
 
 	fmt.Println("secrds Security Monitor started successfully")
 	fmt.Printf("Monitoring SSH connections on port 22...\n")
+	fmt.Printf("Note: For incoming connections, ensure inet_csk_accept kprobe is attached.\n")
+	fmt.Printf("If not, check kernel version and available symbols.\n")
 
 	// Write PID file
 	if err := writePIDFile(cfg.PIDFile); err != nil {
