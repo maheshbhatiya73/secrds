@@ -13,19 +13,19 @@ help:
 	@echo "  help          - Show this help"
 
 build:
-	@echo "Building eBPF Security Monitor..."
+	@echo "Building secrds Security Monitor..."
 	@chmod +x build.sh
 	@./build.sh
 
 install:
-	@echo "Installing eBPF Security Monitor..."
+	@echo "Installing secrds Security Monitor..."
 	@sudo chmod +x install.sh
 	@sudo ./install.sh
 
 clean:
 	@echo "Cleaning build artifacts..."
-	@cargo clean
-	@cd ebpf-detector-ebpf-c && make clean || true
+	@cd secrds-programs && make clean || true
+	@rm -rf target/release/secrds-*
 
 test:
 	@echo "Running tests..."
@@ -41,7 +41,7 @@ clippy:
 
 docker-build:
 	@echo "Building Docker image..."
-	@docker build -t ebpf-detector:latest .
+	@docker build -t secrds:latest .
 
 docker-run:
 	@echo "Running Docker container..."
